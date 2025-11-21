@@ -6,7 +6,9 @@ from Crypto.Random import get_random_bytes
 from dataclasses import dataclass
 from pprint import pprint
 
-SECLambda = Literal[128, 192, 256]
+type SECLambda = Literal[128, 192, 256]
+type F_2 = Literal[0, 1]
+type bitVectorJ = List[F_2] # bit vector of size depth [b_0, b_1, b_2, ..., b_(depth-1)]
 
 @dataclass
 class ggmTreeLeaves:
@@ -124,9 +126,10 @@ def H_0(k_j_j:bytes, iv:bytes, output_lambda:SECLambda) -> tuple[bytes, bytes]:
     Args:
         k_j_j (bytes): _description_
         iv (bytes): _description_
+        output_lambda (SECLambda): number of bits for security parameter. 
 
     Returns:
-        tuple[bytes, bytes]: _description_
+        tuple[bytes, bytes]: sj_j of size λ bits, com_j of size 2λ bits
     """
     #concatenate k_j_j and iv
 
@@ -141,11 +144,16 @@ def H_0(k_j_j:bytes, iv:bytes, output_lambda:SECLambda) -> tuple[bytes, bytes]:
     i = (0).to_bytes(1, 'big')
     shake.update(m + i)
     
-    hash = shake.read( (output_lambda+ (2*output_lambda))//8)
+    hash = shake.read( (output_lambda+ (2*output_lambda)) //8)  
     
     
-    sd_j = hash[0:output_lambda] #size λ, first λ bits
-    com_j = hash[output_lambda:] #size 2λ
+    sd_j = hash[0:(output_lambda//8)] #size λ, first λ bits   
+    if len(sd_j) != (output_lambda//8):
+        raise ValueError("H_0: sd_j length mismatch")
+    com_j = hash[(output_lambda//8):] #size 2λ
+    if len(com_j) != (2*output_lambda)//8:
+        raise ValueError("H_0: com_j length mismatch")
+    
     return sd_j, com_j
 
 def H_1(commits:List[bytes], l:SECLambda) -> bytes:
@@ -198,7 +206,7 @@ def commit(r:bytes, iv:bytes, depth:int) -> Tuple[bytes, Decommitment, List[byte
     #loop to fill in the exrta layer of leaves
     for j in range(0, N):
         leaves.seeds[j], leaves.commitments[j] = H_0(ggm_tree_keys[depth][j], iv, sec_lambda_value)
-        
+
     h = H_1(leaves.commitments, sec_lambda_value)
 
     #decommitment information are the ggm tree nodes and the leaves commitments
@@ -207,6 +215,45 @@ def commit(r:bytes, iv:bytes, depth:int) -> Tuple[bytes, Decommitment, List[byte
     return h, decommitments, leaves.seeds
 
 
+
+def NumRec(depth:int, bits_index:bitVectorJ)-> int:
+    """depth of the tree and index of the leaf
+    index = [b_0, b_1, b_2, ..., b_(depth-1)] where b_i is 0 or 1
+    converts to a number in little endian format
+    Args:
+        depth (int): _description_
+        index (list): _description_
+    """
+    total:int = 0
+    for i in range(depth):
+        total += bits_index[i] * (2**i)
+
+    return total
+
+def VC_Open(decommitments: Decommitment, bit_vector_j : bitVectorJ):
+    depth = len(decommitments.nodes) - 1 #3
+    print(f"FUNC: VC_Open: depth of the tree is {depth}")
+    j_star :int = NumRec(depth, bit_vector_j)
+
+    a:int = 0
+    cop : list[bytes] = []
+    for i in range(1, depth+1):  #1,2,3
+        print(f"i is {i} ")
+        cop.append (   decommitments.nodes[i][ (2*a) +  (bit_vector_j[depth-i] ^ 1)  ]   )#sibling node
+        print(f" sibling node is k^{i}_ { (2*a) +  (bit_vector_j[depth-i] ^ 1)  }  ")
+        a = 2*a + bit_vector_j[depth - i]
+    
+    if len(cop) != depth:
+        raise ValueError("VC_Open: cop length mismatch")
+
+    com_j_star = decommitments.commitments[j_star]
+    if com_j_star == b'0':
+        raise ValueError("VC_Open: com_j_star is not filled in properly, look at H_0 function")
+    
+    print(f"FUNC: VC_Open: com_j_star at index {j_star} is {com_j_star}")
+
+    pdcom = cop, com_j_star
+    return pdcom
 
 r = get_random_bytes(128//8)
 iv = get_random_bytes(128//8)
@@ -219,3 +266,10 @@ print(f"Commitment: {h!r}")
 pprint(f"decommitments nodes: {len(decommitments.nodes)}")
 
 print_nested(decommitments.nodes)
+print(f"decommitments commitments: {decommitments.commitments}")
+
+bit_vector: bitVectorJ= [1, 0, 1]
+print(f"NumRec for index {bit_vector} is {NumRec(depth, bit_vector)}")
+
+pdcom = VC_Open(decommitments, bit_vector)
+print(f"Proof of decommitment: {pdcom}")
