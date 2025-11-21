@@ -3,8 +3,14 @@ from Crypto.Cipher import AES
 from Crypto.Util import Counter
 from Crypto.Hash import SHAKE128
 from Crypto.Random import get_random_bytes
+from dataclasses import dataclass
 
 SECLambda = Literal[128, 192, 256]
+
+@dataclass
+class Decommitment:
+    seeds : List[bytes]
+    commitments : List[bytes]
 
 def create_empty_ggm_tree(depth: int) -> list[list[  bytes]]:
     """Create an empty GGM tree as a list of levels.
@@ -29,7 +35,7 @@ def create_empty_ggm_tree(depth: int) -> list[list[  bytes]]:
     return tree
 
 
-def create_leaves(depth: int) -> Tuple[ List [ bytes ], List [ bytes ]]:
+def create_leaves(depth: int) -> Decommitment:
     """creates 2 lists, each of side 2**N. one to hold each of the seeds sd_j and another to hold the hashes of them
 
     Args:
@@ -39,9 +45,13 @@ def create_leaves(depth: int) -> Tuple[ List [ bytes ], List [ bytes ]]:
         Tuple[List[None], List[None]]: _description_
     """
     n = 2 ** depth
+    decommitments = Decommitment( seeds= [b'0'] * n , commitments= [b'0'] * n )
+    return decommitments
     seeds: list[ bytes] = [b'0'] * n
     commits:list[ bytes] = [b'0'] * n
     return seeds, commits
+
+
 
 # tree = create_empty_ggm_tree(depth=3)
 # tree[0][0] = "dhajkshdjs"
@@ -143,7 +153,7 @@ def H_1(commits:List[bytes], l:SECLambda) -> bytes:
 
 #========
 
-def commit(r:bytes, iv:bytes, depth:int) -> Tuple[bytes, Tuple[list[bytes], list[bytes]]]:
+def commit(r:bytes, iv:bytes, depth:int) -> Tuple[bytes, Decommitment]:
     """VC.commit: code to generate one GGM tree and commitment leaves 
 
     Args:
@@ -156,8 +166,8 @@ def commit(r:bytes, iv:bytes, depth:int) -> Tuple[bytes, Tuple[list[bytes], list
     """
     
     ggm_tree_keys = create_empty_ggm_tree(depth)
-    seeds ,commitments = create_leaves(depth) # leaves to hold sd_j and their hashes/decommitments
-    print(f"FUNC: commit: Initialised seeds (list[None] of size {len(seeds)}):  {seeds} \n and commitments (list of size {len(commitments)}) {commitments}")
+    decommitments = create_leaves(depth) # leaves to hold sd_j and their hashes/decommitments
+    print(f"FUNC: commit: Initialised seeds (list[None] of size {len(decommitments.seeds)}):  {decommitments.seeds} \n and commitments (list of size {len(decommitments.commitments)}) {decommitments.commitments}")
     N = 2**depth
 
     ggm_tree_keys[0][0] = r # type: ignore #k^0_0 = r
@@ -170,11 +180,11 @@ def commit(r:bytes, iv:bytes, depth:int) -> Tuple[bytes, Tuple[list[bytes], list
 
     #loop to fill in the exrta layer of leaves= decommitments = seeds, commitments
     for j in range(0, N):
-        seeds[j], commitments[j] = H_0(ggm_tree_keys[depth][j], iv, sec_lambda_value)
+        decommitments.seeds[j], decommitments.commitments[j] = H_0(ggm_tree_keys[depth][j], iv, sec_lambda_value)
         
-    h = H_1(commitments, sec_lambda_value)
+    h = H_1(decommitments.commitments, sec_lambda_value)
 
-    decommitments = (seeds, commitments)
+    # decommitments = (seeds, commitments)
 
     return h, decommitments
 
@@ -187,4 +197,4 @@ print("Running commitments test...")
 h, decommitments = commit(r, iv, depth)
 print("=== Commitments Test ===")
 print(f"Commitment: {h!r}")
-print(f"Decommitments: {len(decommitments)}, {len(decommitments[0])}, {len(decommitments[1])}")
+print(f"Decommitments: {decommitments.seeds}, {decommitments.commitments}")
