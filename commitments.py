@@ -9,16 +9,27 @@ from pprint import pprint
 type SECLambda = Literal[128, 192, 256]
 type F_2 = Literal[0, 1]
 type bitVectorJ = List[F_2] # bit vector of size depth [b_0, b_1, b_2, ..., b_(depth-1)]
+type Hash = bytes
+type Commitments = list[Hash]
+type GGMTree = list[list[GGMTreeNode]] # GGM tree as a list of levels, each level is a list of bytes
+type GGMTreeNode = bytes
+type Seeds = bytes
 
 @dataclass
-class ggmTreeLeaves:
-    seeds : List[bytes]
-    commitments : List[bytes]
+class PartialDecommitment:
+    cop: list[GGMTreeNode]  #list of sibling nodes from root to leaf
+    com_j_star: Hash       #commitment at leaf j_star
+
+
+@dataclass
+class GGMTreeLeaves:
+    seeds : List[Seeds]
+    commitments : list[Hash]
 
 @dataclass
 class Decommitment:
-    nodes: list[list[bytes]] #ggm tree nodes
-    commitments: list[bytes]
+    nodes: GGMTree #ggm tree nodes, the full GGM tree basically
+    commitments: list[Hash] #list of commitments at leaves
 
 def print_nested(lst, indent=0):
     '''Helper function to print nested lists nicely'''
@@ -31,7 +42,7 @@ def print_nested(lst, indent=0):
             print("  " * indent + str(item))
 
 
-def create_empty_ggm_tree(depth: int) -> list[list[  bytes]]:
+def create_empty_ggm_tree(depth: int) -> GGMTree:
     """Create an empty GGM tree as a list of levels.
     # a GGM tree will look like a nested list with placeholder value as b'0' which can later be filled with data
         # [
@@ -44,7 +55,7 @@ def create_empty_ggm_tree(depth: int) -> list[list[  bytes]]:
 
     if depth < 0:
         raise ValueError("Depth must be non-negative")
-    tree: list[list[ bytes]] = []
+    tree: GGMTree = []
     for level in range(depth + 1):
         level_nodes: list[ bytes] = []
         for _ in range(2 ** level):
@@ -54,7 +65,7 @@ def create_empty_ggm_tree(depth: int) -> list[list[  bytes]]:
     return tree
 
 
-def create_leaves(depth: int) -> ggmTreeLeaves:
+def create_leaves(depth: int) -> GGMTreeLeaves:
     """creates 2 lists, each of side 2**N. one to hold each of the seeds sd_j and another to hold the hashes of them
 
     Args:
@@ -64,7 +75,7 @@ def create_leaves(depth: int) -> ggmTreeLeaves:
         Tuple[List[None], List[None]]: _description_
     """
     n = 2 ** depth
-    leaves = ggmTreeLeaves( seeds= [b'0'] * n , commitments= [b'0'] * n )
+    leaves = GGMTreeLeaves( seeds= [b'0'] * n , commitments= [b'0'] * n )
     return leaves
     # seeds: list[ bytes] = [b'0'] * n
     # commits:list[ bytes] = [b'0'] * n
@@ -76,7 +87,7 @@ def create_leaves(depth: int) -> ggmTreeLeaves:
 # tree[0][0] = "dhajkshdjs"
 # # print(tree)
 
-def PRG(seed: bytes, iv: bytes, output_lambda: SECLambda) -> Tuple[bytes, bytes]:
+def PRG(seed: GGMTreeNode, iv: bytes, output_lambda: SECLambda) -> Tuple[GGMTreeNode, GGMTreeNode]:
     """PRG : {0, 1}λ × {0, 1}128 → {0, 1}∗, a pseudo-random generator taking as 
     input a λ-bit seed and a 128-bit initialization vector.
 
@@ -112,15 +123,15 @@ def PRG(seed: bytes, iv: bytes, output_lambda: SECLambda) -> Tuple[bytes, bytes]
         ct1 = cipher1.encrypt(plaintext= b'\x00'*16)
         ct2 = cipher2.encrypt(plaintext= b'\x00'*16)
 
-        k_1 = ct1
-        k_2 = ct2
+        k_1: GGMTreeNode = ct1
+        k_2: GGMTreeNode = ct2
 
         return k_1, k_2
     else:
         raise NotImplementedError("PRG currently implemented only for output_lambda = 128")
     
 
-def H_0(k_j_j:bytes, iv:bytes, output_lambda:SECLambda) -> tuple[bytes, bytes]:
+def H_0(k_j_j:GGMTreeNode, iv:bytes, output_lambda:SECLambda) -> tuple[Seeds, Hash]:
     """H0 : {0, 1}^(λ+128) → {0, 1}λ * {0, 1}2λ, hash function for commitments_
 
     Args:
@@ -147,10 +158,10 @@ def H_0(k_j_j:bytes, iv:bytes, output_lambda:SECLambda) -> tuple[bytes, bytes]:
     hash = shake.read( (output_lambda+ (2*output_lambda)) //8)  
     
     
-    sd_j = hash[0:(output_lambda//8)] #size λ, first λ bits   
+    sd_j: Seeds = hash[0:(output_lambda//8)] #size λ, first λ bits   
     if len(sd_j) != (output_lambda//8):
         raise ValueError("H_0: sd_j length mismatch")
-    com_j = hash[(output_lambda//8):] #size 2λ
+    com_j: Hash = hash[(output_lambda//8):] #size 2λ
     if len(com_j) != (2*output_lambda)//8:
         raise ValueError("H_0: com_j length mismatch")
     
@@ -190,8 +201,8 @@ def commit(r:bytes, iv:bytes, depth:int) -> Tuple[bytes, Decommitment, List[byte
         Tuple[bytes, Tuple[list[bytes], list[bytes]]]: _description_
     """
     
-    ggm_tree_keys = create_empty_ggm_tree(depth)
-    leaves = create_leaves(depth) # leaves to hold sd_j and their hashes/decommitments
+    ggm_tree_keys: GGMTree = create_empty_ggm_tree(depth)
+    leaves : GGMTreeLeaves = create_leaves(depth) # leaves to hold sd_j and their hashes/decommitments
     print(f"FUNC: commit: Initialised seeds (list[None] of size {len(leaves.seeds)}):  {leaves.seeds} \n and commitments (list of size {len(leaves.commitments)}) {leaves.commitments}")
     N = 2**depth
 
@@ -230,13 +241,29 @@ def NumRec(depth:int, bits_index:bitVectorJ)-> int:
 
     return total
 
-def VC_Open(decommitments: Decommitment, bit_vector_j : bitVectorJ):
+def VC_Open(decommitments: Decommitment, bit_vector_j : bitVectorJ) -> PartialDecommitment:
+    """_summary_
+
+    Args:
+        decommitments (Decommitment): _description_
+        bit_vector_j (bitVectorJ): _description_
+
+    Raises:
+        ValueError: _description_
+        ValueError: _description_
+
+    Returns:
+        _type_: _description_
+        pdcom/patial decommitment is made up of:
+        1. cop: list of sibling nodes from root to leaf
+        2. com_j_star: commitment at leaf j_star
+    """
     depth = len(decommitments.nodes) - 1 #3
     print(f"FUNC: VC_Open: depth of the tree is {depth}")
     j_star :int = NumRec(depth, bit_vector_j)
 
     a:int = 0
-    cop : list[bytes] = []
+    cop : list[GGMTreeNode] = []
     for i in range(1, depth+1):  #1,2,3
         print(f"i is {i} ")
         cop.append (   decommitments.nodes[i][ (2*a) +  (bit_vector_j[depth-i] ^ 1)  ]   )#sibling node
@@ -246,14 +273,19 @@ def VC_Open(decommitments: Decommitment, bit_vector_j : bitVectorJ):
     if len(cop) != depth:
         raise ValueError("VC_Open: cop length mismatch")
 
-    com_j_star = decommitments.commitments[j_star]
+    com_j_star: Hash = decommitments.commitments[j_star]
     if com_j_star == b'0':
         raise ValueError("VC_Open: com_j_star is not filled in properly, look at H_0 function")
     
     print(f"FUNC: VC_Open: com_j_star at index {j_star} is {com_j_star}")
 
-    pdcom = cop, com_j_star
+    pdcom = PartialDecommitment(cop, com_j_star)
     return pdcom
+
+
+def VC_reconstruct(pdecom : PartialDecommitment, bit_vector_j: bitVectorJ, iv:bytes) -> Tuple[Hash, GGMTree]:
+    pass
+
 
 r = get_random_bytes(128//8)
 iv = get_random_bytes(128//8)
