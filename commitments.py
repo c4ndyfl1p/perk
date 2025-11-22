@@ -315,30 +315,44 @@ def VC_reconstruct(pdecom : PartialDecommitment, bit_vector_j: bitVectorJ, iv:by
 
     return h, leaves.seeds
 
+def vc_verify(com:Hash, pdcom:PartialDecommitment, bit_vector_j:bitVectorJ, iv:bytes) -> bool:
+    # j_star : int = NumRec(len(bit_vector_j), bit_vector_j)
+    h_reconstructed, _ = VC_reconstruct(pdcom, bit_vector_j, iv)
+    if com == h_reconstructed:
+        return True
+    else:
+        return False
 
 
-r = get_random_bytes(128//8)
-iv = get_random_bytes(128//8)
-depth = 3
-print("Running commitments test...")
-h, decommitments, seeds = commit(r, iv, depth)
-print("=== Commitments Test ===")
-print(f"Commitment: {h!r}")
-# print(f"Decommitments: {decommitments.nodes}, {decommitments.commitments}")
-pprint(f"decommitments nodes: {len(decommitments.nodes)}")
+def vc_test():
+    r = get_random_bytes(128//8)
+    iv = get_random_bytes(128//8)
+    depth = 3
 
-print_nested(decommitments.nodes)
-print(f"decommitments commitments: {decommitments.commitments}")
+    print("Running commitments test...")
+    h, decommitments, seeds = commit(r, iv, depth)
+    # print("=== Commitments Test ===")
+    # print(f"Commitment: {h!r}")
+    # # print(f"Decommitments: {decommitments.nodes}, {decommitments.commitments}")
+    # pprint(f"decommitments nodes: {len(decommitments.nodes)}")
 
-bit_vector: bitVectorJ= [1, 0, 1]
-print(f"NumRec for index {bit_vector} is {NumRec(depth, bit_vector)}")
+    # print_nested(decommitments.nodes)
+    # print(f"decommitments commitments: {decommitments.commitments}")
 
-pdcom = VC_Open(decommitments, bit_vector)
-print(f"Proof of decommitment: {pdcom}")
+    # reciever sends bit vector j
+    bit_vector: bitVectorJ= [1, 0, 1]
+    print(f"NumRec for index {bit_vector} is {NumRec(depth, bit_vector)}")
 
-h_reconstrcted, seeds_reconstructed = VC_reconstruct(pdcom, bit_vector, iv)
-print(f"Reconstructed commitment: {h_reconstrcted!r}")
-print(f"Reconstructed seeds: {seeds_reconstructed}")
+    pdcom = VC_Open(decommitments, bit_vector)
+    # print(f"Proof of decommitment: {pdcom}")
 
-#is h == h_reconstrcted ?
-print(f"Is original commitment equal to reconstructed commitment? {h == h_reconstrcted}")
+    # h_reconstrcted, seeds_reconstructed = VC_reconstruct(pdcom, bit_vector, iv)
+    # print(f"Reconstructed commitment: {h_reconstrcted!r}")
+    # print(f"Reconstructed seeds: {seeds_reconstructed}")
+
+    #is h == h_reconstrcted ?
+    print(f"Is original commitment equal to reconstructed commitment? {vc_verify(h, pdcom, bit_vector, iv)}")
+
+
+print("Running vc_test()...")
+vc_test()
