@@ -145,7 +145,7 @@ def H_0(k_j_j:GGMTreeNode, iv:bytes, output_lambda:SECLambda) -> tuple[Seeds, Ha
     #concatenate k_j_j and iv
 
     if len(k_j_j) != 16:
-        raise ValueError("k_j_j must be 128 bits long")
+        raise ValueError(f"k_j_j must be 128 bits long, k_j_j{k_j_j} length is {len(k_j_j)}")
     if len(iv) != 16:
         raise ValueError("iv must be 128 bits long")
     
@@ -283,8 +283,38 @@ def VC_Open(decommitments: Decommitment, bit_vector_j : bitVectorJ) -> PartialDe
     return pdcom
 
 
-def VC_reconstruct(pdecom : PartialDecommitment, bit_vector_j: bitVectorJ, iv:bytes) -> Tuple[Hash, GGMTree]:
-    pass
+def VC_reconstruct(pdecom : PartialDecommitment, bit_vector_j: bitVectorJ, iv:bytes) -> Tuple[Hash, list[Seeds]]:
+    j_star : int = NumRec(len(bit_vector_j), bit_vector_j)
+    depth= len(bit_vector_j) 
+    a = 0 
+    reconstructed_ggm_trees_keys = create_empty_ggm_tree(depth)
+    reconstructed_ggm_trees_keys[0][0] = b'None'
+    for i in range(1, depth+1):
+        
+        reconstructed_ggm_trees_keys[i][ (2*a) +  (bit_vector_j[depth-i] ^ 1)  ]   = pdecom.cop [i-1] # siblin node
+        reconstructed_ggm_trees_keys[i][ (2*a) +  (bit_vector_j[depth-i])  ] = b'None' # We dont need this value for reconstruction
+
+        for j in range(0, 2**(i-1)):
+            if j == a:
+                continue
+            k_left, k_right = PRG(reconstructed_ggm_trees_keys[i-1][j], iv, 128)
+            reconstructed_ggm_trees_keys[i][2*j] = k_left
+            reconstructed_ggm_trees_keys[i][(2*j) + 1] = k_right
+        
+        a  = 2*a + bit_vector_j[depth - i]
+
+    leaves : GGMTreeLeaves = create_leaves(depth)
+    for j in range(0, 2**depth):
+        if j == j_star:
+            leaves.commitments[j] = pdecom.com_j_star
+            leaves.seeds[j] = b'None'
+        else:
+            leaves.seeds[j], leaves.commitments[j] = H_0(reconstructed_ggm_trees_keys[depth][j], iv, 128)
+        
+    h: Hash = H_1(leaves.commitments, 128)
+
+    return h, leaves.seeds
+
 
 
 r = get_random_bytes(128//8)
@@ -305,3 +335,10 @@ print(f"NumRec for index {bit_vector} is {NumRec(depth, bit_vector)}")
 
 pdcom = VC_Open(decommitments, bit_vector)
 print(f"Proof of decommitment: {pdcom}")
+
+h_reconstrcted, seeds_reconstructed = VC_reconstruct(pdcom, bit_vector, iv)
+print(f"Reconstructed commitment: {h_reconstrcted!r}")
+print(f"Reconstructed seeds: {seeds_reconstructed}")
+
+#is h == h_reconstrcted ?
+print(f"Is original commitment equal to reconstructed commitment? {h == h_reconstrcted}")
